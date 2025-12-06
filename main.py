@@ -14,6 +14,17 @@ HEADERS = {
 def get_direct_download_link(package_name):
     return f"https://d.apkpure.com/b/APK/{package_name}?version=latest"
 
+def get_app_size(app_url):
+    try:
+        response = requests.get(app_url, headers=HEADERS, timeout=5)
+        if response.status_code == 200:
+            size_match = re.search(r'(\d+\.?\d*)\s*(MB|KB|GB)', response.text, re.IGNORECASE)
+            if size_match:
+                return f"{size_match.group(1)} {size_match.group(2).upper()}"
+    except Exception:
+        pass
+    return None
+
 def extract_package_name(url):
     parts = url.rstrip('/').split('/')
     for part in reversed(parts):
@@ -95,6 +106,9 @@ def recherche():
                         parent_container = parent_container.parent
                     else:
                         break
+                
+                if not file_size and href:
+                    file_size = get_app_size(href)
                 
                 download_link = get_direct_download_link(package_name)
                 
