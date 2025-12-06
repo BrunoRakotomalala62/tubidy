@@ -83,11 +83,25 @@ def recherche():
                 if img_elem:
                     image_url = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-original')
                 
+                file_size = None
+                parent_container = link.parent
+                for _ in range(5):
+                    if parent_container:
+                        container_text = parent_container.get_text()
+                        size_match = re.search(r'(\d+\.?\d*)\s*(MB|KB|GB)', container_text, re.IGNORECASE)
+                        if size_match:
+                            file_size = f"{size_match.group(1)} {size_match.group(2).upper()}"
+                            break
+                        parent_container = parent_container.parent
+                    else:
+                        break
+                
                 download_link = get_direct_download_link(package_name)
                 
                 results.append({
                     "nom": name,
                     "image_url": image_url,
+                    "taille": file_size,
                     "lien_apk": download_link
                 })
                 
