@@ -1,8 +1,26 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
+import re
 
 app = Flask(__name__)
+
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+}
+
+def get_direct_download_link(package_name):
+    return f"https://d.apkpure.com/b/APK/{package_name}?version=latest"
+
+def extract_package_name(url):
+    parts = url.rstrip('/').split('/')
+    for part in reversed(parts):
+        if '.' in part and not part.startswith('http') and part not in ['download', 'versions']:
+            if re.match(r'^[a-zA-Z][a-zA-Z0-9_.]*\.[a-zA-Z0-9_.]+$', part):
+                return part
+    return None
 
 @app.route('/')
 def home():
@@ -21,93 +39,63 @@ def recherche():
     
     url = f"https://apkpure.com/fr/search?q={apk_query}&t="
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-    }
-    
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
         results = []
+        seen_packages = set()
         
-        app_items = soup.select('.search-res .apk-list .list-wrap .list-content')
+        all_links = soup.select('a[href*="apkpure.com/fr/"]')
         
-        if not app_items:
-            app_items = soup.select('.search-res li')
-        
-        if not app_items:
-            app_items = soup.select('.search-result-list .list-item')
-        
-        if not app_items:
-            app_items = soup.select('[class*="search"] [class*="item"]')
-        
-        for item in app_items[:20]:
+        for link in all_links:
             try:
-                name_elem = item.select_one('.p1, .title, h3, .name, [class*="title"]')
-                name = name_elem.get_text(strip=True) if name_elem else None
+                href = link.get('href', '')
                 
-                img_elem = item.select_one('img')
+                if '/download' in href or '/versions' in href or '/howto/' in href:
+                    continue
+                
+                package_name = extract_package_name(href)
+                if not package_name or package_name in seen_packages:
+                    continue
+                
+                seen_packages.add(package_name)
+                
+                name_elem = link.select_one('.p1, .title, h3, .name, [class*="title"]')
+                if name_elem:
+                    name = name_elem.get_text(strip=True)
+                else:
+                    text = link.get_text(strip=True)
+                    name = text[:80] if text else None
+                
+                if not name or len(name) < 2:
+                    continue
+                
+                img_elem = link.select_one('img')
+                if not img_elem:
+                    parent = link.parent
+                    if parent:
+                        img_elem = parent.select_one('img')
+                
                 image_url = None
                 if img_elem:
                     image_url = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-original')
                 
-                link_elem = item.select_one('a[href*="/"]')
-                lien_apk = None
-                if link_elem:
-                    href = link_elem.get('href', '')
-                    if href.startswith('/'):
-                        lien_apk = f"https://apkpure.com{href}"
-                    elif href.startswith('http'):
-                        lien_apk = href
+                download_link = get_direct_download_link(package_name)
                 
-                if name or lien_apk:
-                    results.append({
-                        "nom": name,
-                        "image_url": image_url,
-                        "lien_apk": lien_apk
-                    })
+                results.append({
+                    "nom": name,
+                    "image_url": image_url,
+                    "lien_apk": download_link
+                })
+                
+                if len(results) >= 15:
+                    break
+                    
             except Exception:
                 continue
-        
-        if not results:
-            cards = soup.select('a[href*="/"][class*="card"], a[href*="/"][class*="item"], .card, .item')
-            for card in cards[:20]:
-                try:
-                    if card.name == 'a':
-                        href = card.get('href', '')
-                        name_elem = card.select_one('.p1, .title, h3, .name, [class*="title"], p')
-                        name = name_elem.get_text(strip=True) if name_elem else card.get_text(strip=True)[:50]
-                    else:
-                        link_elem = card.select_one('a[href*="/"]')
-                        href = link_elem.get('href', '') if link_elem else ''
-                        name_elem = card.select_one('.p1, .title, h3, .name, [class*="title"], p')
-                        name = name_elem.get_text(strip=True) if name_elem else None
-                    
-                    img_elem = card.select_one('img')
-                    image_url = None
-                    if img_elem:
-                        image_url = img_elem.get('src') or img_elem.get('data-src') or img_elem.get('data-original')
-                    
-                    lien_apk = None
-                    if href:
-                        if href.startswith('/'):
-                            lien_apk = f"https://apkpure.com{href}"
-                        elif href.startswith('http'):
-                            lien_apk = href
-                    
-                    if name and lien_apk and 'apkpure.com' in (lien_apk or ''):
-                        results.append({
-                            "nom": name,
-                            "image_url": image_url,
-                            "lien_apk": lien_apk
-                        })
-                except Exception:
-                    continue
         
         return jsonify({
             "recherche": apk_query,
